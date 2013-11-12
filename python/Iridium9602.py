@@ -10,12 +10,11 @@ from smtp_stuff import sendMail
 from imap_stuff import checkMessages
 
 
-AVERAGE_SBDIX_DELAY = 5     #TODO: implement randomness, average is ~30s
-STDEV_SBDIX_DELAY = 10 
-AVERAGE_SBDIX_SUCCESS = 0.5
+AVERAGE_SBDIX_DELAY = 1     #TODO: implement randomness, average is ~30s
+STDEV_SBDIX_DELAY = 1 
+AVERAGE_SBDIX_SUCCESS = 0.9
 
-
-AVERAGE_CSQ_DELAY = 3
+AVERAGE_CSQ_DELAY = 1
 STDEV_CSQ_DELAY = 1
 
 EOL_CHAR = 13
@@ -60,7 +59,7 @@ password = ''
 
 email_enabled = False
 
-imei = 304050607080903
+imei = 300234060379270
 
 email_enabled = False
 ip_enabled = False
@@ -81,15 +80,15 @@ def send_mo_email():
 
     #put together body
     body = \
-'MOMSN: %d\n\r\
-MTMSN: %d\n\r\
-Time of Session (UTC): %s\n\r\
-Session Status: TRANSFER OK\n\r\
-Message Size: %d\n\r\
-\n\r\
-Unit Location: Lat = %8.6f Long = %8.6f\n\r\
-CEPRadius = 3\n\r\
-\n\r\
+'MOMSN: %d\r\n\
+MTMSN: %d\r\n\
+Time of Session (UTC): %s\r\n\
+Session Status: TRANSFER OK\r\n\
+Message Size: %d\r\n\
+\r\n\
+Unit Location: Lat = %8.6f Long = %8.6f\r\n\
+CEPRadius = 3\r\n\
+\r\n\
 Message is Attached.'\
     % (momsn, mtmsn, time.asctime(), len(mo_buffer), lat, lon)
             
@@ -97,7 +96,7 @@ Message is Attached.'\
     subject = 'SBD Msg From Unit: %d' % (imei)
             
     #message is included as an attachment
-    attachment = 'text.txt'
+    attachment = 'text.sbd'
     fd = open(attachment, 'wb')
     fd.write(mo_buffer)
     fd.close()
@@ -149,7 +148,7 @@ def sbdix():
     received_msg_size = 0
     unread_msgs = 0
     time.sleep(AVERAGE_SBDIX_DELAY)
-    success = (bool(random.getrandbits(1)))
+    success = True#(bool(random.getrandbits(1)))
 
 
     if success:
@@ -157,16 +156,17 @@ def sbdix():
         #use e-mail interface if specified
         if email_enabled:
             #send e-mail if outgoing data is present
-            if mo_set:
+            if mo_set and not mo_buffer == "":
                 if email_enabled:
                     send_mo_email()
                 mo_set = False
-                momsn += 1 
+                momsn += 1
+                 
             
             #check e-mail for messages
             temp, received_msg, unread_msgs  = checkMessages(incoming_server,user,password,imei)
             if received_msg:
-                mtmsn += 1
+                #mtmsn += 1
                 received_msg_size = len(temp)
                 mt_buffer = temp
             else:
@@ -176,13 +176,15 @@ def sbdix():
     if success: rpt = 0
     else: rpt = 18 #TODO: add more sophisticated behavior for error msgs
     
-    return_string = "\nSBDIX:%d,%d,%d,%d,%d,%d\r\n" % (rpt,momsn,received_msg,mtmsn,received_msg_size,unread_msgs)
-
+    return_string = "\r\n+SBDIX: %d, %d, %d, %d, %d, %d\r\n" % (rpt,momsn,received_msg,mtmsn,received_msg_size,unread_msgs)
+    #+SBDIX:<MO status>,<MOMSN>,<MT status>,<MTMSN>,<MT length>,<MT queued>
+    print "Sent:",return_string
     ser.write(return_string)
     send_ok()
         
     mo_set = False
-
+    if received_msg:
+        mtmsn += 1
 def sbd_reg():
     global registered
     
@@ -219,24 +221,34 @@ def read_binary():
     global mt_buffer
     len_msb = ( len(mt_buffer)/256 ) & 255 
     len_lsb = ( len(mt_buffer)/1 ) & 255 
-    mt_buffer_sum = sum(bytearray(mt_buffer))
+    mt_buffer_sum = sum(bytearray(mt_buffer)) 
     checksum_msb =  ((mt_buffer_sum & (2**16-1)) / (255) ) & 255
     checksum_lsb =  ((mt_buffer_sum & (2**16-1)) / (1) ) & 255
-    ser.write("\r%s%s%s%s%s" % (chr(len_msb), chr(len_lsb), mt_buffer,chr(checksum_msb),chr(checksum_lsb)) )
+    print "Device is reading binary from MT buffer: ",mt_buffer
+    #array.array
+    #ser.write(len_msb)
+    #ser.write(len_lsb)
+    #ser.write(mt_buffer)
+    #ser.write(checksum_msb)
+    #ser.write(checksum_lsb)
+    ser.write("%s%s%s%s%s" % (chr(len_msb), chr(len_lsb), mt_buffer,chr(checksum_msb),chr(checksum_lsb)) )
+    print "\r\n%s%s%s%s%s" % (chr(len_msb), chr(len_lsb), mt_buffer,chr(checksum_msb),chr(checksum_lsb))
     print checksum_msb, checksum_lsb, len_msb, len_lsb, mt_buffer
     send_ok()
+    
 
 def send_ok():
     global ser
-    ser.write('\n\rOK\n\r')
+    ser.write('\r\nOK\r\n')
+    print "Sending OK"
     
 def send_error():
     global ser
-    ser.write('\n\rERROR\n\r')
+    ser.write('\r\nERROR\r\n')
 
 def send_ready():
     global ser
-    ser.write('\n\rREADY\n\r')
+    ser.write('\r\nREADY\r\n')
 
 def do_ok():
     print 'Received blank command'
@@ -251,19 +263,19 @@ def clear_buffers(buffer):
     if buffer == 0:
         mo_buffer = ''
         mo_set = False
-        ser.write('\n\r0\n\r')
+        ser.write('\r\n0\r\n')
         send_ok()
     elif buffer == 1:
         mt_buffer = ''
         mt_set = False
-        ser.write('\n\r0\n\r')
+        ser.write('\r\n0\r\n')
         send_ok()
     elif buffer == 2:
         mt_buffer = ''
         mo_buffer = ''
         mo_set = False
         mt_set = False
-        ser.write('\n\r0\n\r')
+        ser.write('\r\n0\r\n')
         send_ok()
     else:
         send_error()
@@ -271,7 +283,7 @@ def clear_buffers(buffer):
 
 def clear_momsn():
     momsn = 0
-    ser.write('\n\r0\n\r')
+    ser.write('\r\n0\r\n')
 
 def get_sbd_status():
     global mt_set
@@ -312,13 +324,16 @@ def copy_mo_to_mt():
     send_ok()
     
 def which_gateway():
-    return_string = "\nSBDGW:EMSS\r\n"
+    return_string = "\rSBDGW:EMSS\r\n"
 
     ser.write(return_string)
     send_ok()
 
 def get_system_time():
-    print 'We havent actually implemented this yet.'
+    return_string = "\r\n---MSSTM: 01002000\r\n"
+    ser.write(return_string)
+    send_ok()
+    print 'We havent actually implemented MSSTM this yet.'
     
 def set_ring_indicator(cmd,start_index):
     global ring_enable
@@ -337,7 +352,7 @@ def set_ring_indicator(cmd,start_index):
 
     
 def get_signal_strength():
-    return_string = "\n+CSQ:%d\r\n" % (random.randint(0,5))
+    return_string = "\r\n+CSQ:%d\r\n" % 5#(random.randint(0,5))
     time.sleep(AVERAGE_SBDIX_DELAY)
     ser.write(return_string)
     send_ok()
@@ -383,7 +398,7 @@ def write_binary_start(cmd,start_index):
     try:
         binary_rx_incoming_bytes = int(text)
         if (binary_rx_incoming_bytes > 340):
-            ser.write('\r\n\r3\r\n')
+            ser.write('\r\r\n3\r\n')
             send_ok()
             binary_rx_incoming_bytes = 0
         else:
@@ -398,7 +413,7 @@ def parse_cmd(cmd):
     index = cmd.find('=')
     if index == -1:
         index = cmd.find('\r')
-    cmd_type = cmd[0:index]
+    cmd_type = cmd[0:index].lower()
     
     #print cmd_type
     
@@ -428,6 +443,9 @@ def parse_cmd(cmd):
     elif cmd_type == 'at+sbdgw'     : which_gateway()
     elif cmd_type == 'at-msstm'     : get_system_time()
     elif cmd_type == 'at+sbdmta'    : set_ring_indicator(cmd,index + 1)
+    elif cmd_type == 'ate1'    : do_ok()
+    elif cmd_type == 'at&d0'    : do_ok()
+    elif cmd_type == 'at&k0'    : do_ok()
     else : send_error()
     
 
@@ -535,14 +553,14 @@ def main():
                 #check the checksum
                 if (checksum_first * 256 + checksum_second) == (binary_checksum & (2**16-1)):
                     print "Good binary checksum"
-                    ser.write('\n\r0\r\n')
+                    ser.write('\r\n0\r\n')
                     send_ok()
                     mo_buffer = rx_buffer
                     rx_buffer = ''
                     mo_set = True
                 else:
                     print "Bad binary checksum"
-                    ser.write('\n\r2\r\n')
+                    ser.write('\r\n2\r\n')
                     send_ok()
                     rx_buffer = ''
                     ser.write('\n')            
