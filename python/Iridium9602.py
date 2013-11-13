@@ -523,6 +523,7 @@ def main():
     
     while(1):
         new_char = ser.read()
+        #print new_char
         if echo and not binary_rx:
             ser.write(new_char)
             
